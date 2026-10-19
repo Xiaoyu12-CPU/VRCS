@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { audioSelectionErrors } from "./settings-validation";
 import type { AudioDevice } from "../capture/types";
 import type { Health } from "../core-client/types";
-import type { DictionarySource } from "../dictionary/types";
+import type { DictionaryCatalogId, DictionaryImportProgress, DictionarySource } from "../dictionary/types";
 import type { Settings } from "./types";
 import { SettingsTabBar } from "./components/SettingsTabBar";
 import { resolveSettingsCategory, visibleSettingsCategories } from "./feature-availability";
@@ -44,6 +44,7 @@ export function SettingsPanel({
   onRefresh,
   onRefreshSettings,
   onImportDictionary,
+  onInstallDictionary,
   onDeleteDictionary,
   onModelsChanged,
   onInterfaceScaleChange,
@@ -69,6 +70,7 @@ export function SettingsPanel({
     file: File,
     onProgress?: (progress: number) => void,
   ) => Promise<DictionarySource>;
+  onInstallDictionary: (catalogId: DictionaryCatalogId, onProgress?: (progress: DictionaryImportProgress) => void) => Promise<DictionarySource>;
   onDeleteDictionary: (id: number) => Promise<void>;
   onModelsChanged: () => Promise<void>;
   onInterfaceScaleChange: (value: number) => void;
@@ -102,7 +104,10 @@ export function SettingsPanel({
   });
   const dictionary = useDictionaryActions({
     locale,
+    active: activeCategory === "learning",
+    dictionaries,
     onImport: onImportDictionary,
+    onInstall: onInstallDictionary,
     onDelete: onDeleteDictionary,
   });
 
@@ -233,6 +238,15 @@ export function SettingsPanel({
           dictionaryBusy={dictionary.busy}
           dictionaryMessage={dictionary.message}
           dictionaryProgress={dictionary.progress}
+          dictionaryMessageError={dictionary.messageError}
+          dictionaryQuickInstall={{
+            catalog: dictionary.catalog,
+            loading: dictionary.catalogLoading,
+            error: dictionary.catalogError,
+            installation: dictionary.installation,
+            onInstall: dictionary.install,
+            onReload: dictionary.loadCatalog,
+          }}
           dictionaryFileRef={dictionary.fileInputRef}
           onSelectionLookupChange={(enabled) => applySettings((current) => ({
             ...current,

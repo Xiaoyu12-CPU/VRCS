@@ -293,6 +293,7 @@ export function DesktopShell({
                   onRefresh={settings.devices.refresh}
                   onRefreshSettings={settings.refresh}
                   onImportDictionary={dictionary.importFile}
+                  onInstallDictionary={dictionary.installCatalog}
                   onDeleteDictionary={dictionary.deleteById}
                   onModelsChanged={settings.asr.refresh}
                   onInterfaceScaleChange={settings.setInterfaceScale}

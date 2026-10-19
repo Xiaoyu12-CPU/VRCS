@@ -35,6 +35,12 @@ jobs:
             apps/desktop/src-tauri -> ../../../.build
       - name: Install frontend dependencies
         run: npm ci
+      - name: Test real Korean dictionary download and installation
+        shell: pwsh
+        timeout-minutes: 15
+        run: |
+          cargo test --manifest-path core/Cargo.toml --lib --locked --features vulkan server::dictionary::catalog::tests::dictionary_catalog_real_http_install_smoke -- --ignored --exact --nocapture
+          if ($LASTEXITCODE -ne 0) { throw "Real Korean dictionary installation test failed." }
       - name: Build independent Korean preview
         shell: pwsh
         run: ./scripts/build-korean-preview.ps1

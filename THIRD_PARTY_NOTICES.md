@@ -43,3 +43,18 @@ These assets are downloaded only when requested in OCR settings, retain their
 upstream Apache-2.0 license, and are verified against pinned SHA-256 digests.
 Sources: https://huggingface.co/PaddlePaddle/korean_PP-OCRv5_mobile_rec_onnx
 and https://github.com/PaddlePaddle/PaddleOCR (Copyright PaddlePaddle Authors).
+
+The optional Korean dictionary catalog downloads the KO-ZH.KRDICT.zip and
+KO-JA.KRDICT.zip Yomitan conversions from Lyroxide's pinned 1.0.0 release:
+https://github.com/Lyroxide/yomitan-ko-dic/releases/tag/1.0.0 . These archives are
+not bundled with VRCS; they are fetched only when requested and checked against
+their pinned size and SHA-256 before local import. The underlying Korean
+Learners' Dictionary text is provided by the National Institute of Korean
+Language and remains licensed under CC BY-SA 2.0 KR. Yomitan conversion is by
+Lyroxide. VRCS imports text and corrects the known language metadata for these
+two catalog packages; manually imported archives retain their own metadata.
+Dictionary source and copyright policy:
+https://krdict.korean.go.kr/kor/kboardPolicy/copyRightTermsInfo .
+License: https://creativecommons.org/licenses/by-sa/2.0/kr/ .
+Images, audio and video may have separate terms; this importer does not download
+or import those media.

@@ -59,7 +59,8 @@ Exit standard VRCS before starting this preview: both use the SteamVR overlay na
 
 For Korean signs: Vision settings > OCR > Screen text language > Korean (includes English).
 Download that model bundle, then choose your translation target separately.
-Import a compatible Korean Yomitan dictionary to use local word lookup.
+Learning settings > Dictionary provides one-click install for Korean-Chinese and Korean-Japanese KRDICT dictionaries.
+Your own compatible Yomitan ZIP dictionaries can still be imported manually.
 Several possible dictionary forms may be shown; use the sentence context to decide.
 
 Windows build and automated checks do not replace headset/DirectML field testing.

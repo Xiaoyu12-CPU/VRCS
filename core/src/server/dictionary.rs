@@ -16,13 +16,89 @@ use super::{
 use crate::db::Database;
 use crate::error::AppError;
 
+mod catalog;
+pub(super) use catalog::{dictionary_catalog, dictionary_install};
+
 const IMPORT_ID_HEADER: &str = "x-vrcs-import-id";
 const IMPORT_PROGRESS_SCALE: u32 = 10_000;
 const MAX_IMPORT_PROGRESS_ENTRIES: usize = 32;
 static DICTIONARY_IMPORT_PERMITS: LazyLock<Arc<Semaphore>> =
     LazyLock::new(|| Arc::new(Semaphore::new(1)));
-static DICTIONARY_IMPORTS: LazyLock<Mutex<HashMap<String, Arc<AtomicU32>>>> =
+static DICTIONARY_IMPORTS: LazyLock<Mutex<HashMap<String, Arc<ImportProgress>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+
+#[derive(Debug)]
+struct ImportProgress {
+    progress: AtomicU32,
+    details: Mutex<ImportDetails>,
+}
+
+#[derive(Debug)]
+struct ImportDetails {
+    phase: &'static str,
+    downloaded_bytes: u64,
+    total_bytes: u64,
+    error_code: Option<&'static str>,
+}
+
+impl ImportProgress {
+    fn new() -> Self {
+        Self {
+            progress: AtomicU32::new(0),
+            details: Mutex::new(ImportDetails {
+                phase: "importing",
+                downloaded_bytes: 0,
+                total_bytes: 0,
+                error_code: None,
+            }),
+        }
+    }
+
+    fn load(&self, ordering: Ordering) -> u32 {
+        self.progress.load(ordering)
+    }
+
+    fn store(&self, value: u32, ordering: Ordering) {
+        self.progress.store(value, ordering);
+    }
+
+    fn terminal(&self) -> bool {
+        self.load(Ordering::Relaxed) >= IMPORT_PROGRESS_SCALE
+            || self.details.lock().expect("dictionary progress lock").phase == "failed"
+    }
+
+    fn phase(&self, phase: &'static str) {
+        self.details.lock().expect("dictionary progress lock").phase = phase;
+    }
+
+    fn downloading(&self, downloaded_bytes: u64, total_bytes: u64) {
+        let mut details = self.details.lock().expect("dictionary progress lock");
+        details.phase = "downloading";
+        details.downloaded_bytes = downloaded_bytes;
+        details.total_bytes = total_bytes;
+        self.store(
+            ((downloaded_bytes as f64 / total_bytes.max(1) as f64) * 4_500.0).round() as u32,
+            Ordering::Relaxed,
+        );
+    }
+
+    fn failed(&self, code: &'static str) {
+        let mut details = self.details.lock().expect("dictionary progress lock");
+        details.phase = "failed";
+        details.error_code = Some(code);
+    }
+
+    fn snapshot(&self) -> Value {
+        let details = self.details.lock().expect("dictionary progress lock");
+        json!({
+            "progress": self.load(Ordering::Relaxed) as f64 / IMPORT_PROGRESS_SCALE as f64,
+            "phase": details.phase,
+            "downloaded_bytes": details.downloaded_bytes,
+            "total_bytes": details.total_bytes,
+            "error_code": details.error_code,
+        })
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 enum RegisterImportError {
@@ -39,10 +115,10 @@ fn valid_import_id(value: &str) -> bool {
 }
 
 fn register_import_in(
-    imports: &mut HashMap<String, Arc<AtomicU32>>,
+    imports: &mut HashMap<String, Arc<ImportProgress>>,
     import_id: &str,
-) -> Result<Arc<AtomicU32>, RegisterImportError> {
-    imports.retain(|_, value| value.load(Ordering::Relaxed) < IMPORT_PROGRESS_SCALE);
+) -> Result<Arc<ImportProgress>, RegisterImportError> {
+    imports.retain(|_, value| !value.terminal());
     if imports.contains_key(import_id) {
         return Err(RegisterImportError::Conflict);
     }
@@ -50,12 +126,12 @@ fn register_import_in(
         return Err(RegisterImportError::Capacity);
     }
 
-    let progress = Arc::new(AtomicU32::new(0));
+    let progress = Arc::new(ImportProgress::new());
     imports.insert(import_id.to_owned(), Arc::clone(&progress));
     Ok(progress)
 }
 
-fn register_import(import_id: &str) -> Result<Arc<AtomicU32>, RegisterImportError> {
+fn register_import(import_id: &str) -> Result<Arc<ImportProgress>, RegisterImportError> {
     let mut imports = DICTIONARY_IMPORTS.lock().expect("dictionary imports lock");
     register_import_in(&mut imports, import_id)
 }
@@ -237,6 +313,7 @@ pub(super) async fn dictionary_import(
     match result {
         Ok(imported) => {
             if let Some(progress) = progress {
+                progress.phase("complete");
                 progress.store(IMPORT_PROGRESS_SCALE, Ordering::Relaxed);
             }
             Ok(Json(json!(imported)))
@@ -261,7 +338,7 @@ pub(super) async fn dictionary_import_progress(
         .lock()
         .expect("dictionary imports lock")
         .get(&import_id)
-        .map(|value| value.load(Ordering::Relaxed))
+        .map(|value| value.snapshot())
         .ok_or_else(|| {
             api_error(
                 StatusCode::NOT_FOUND,
@@ -269,9 +346,7 @@ pub(super) async fn dictionary_import_progress(
                 "Dictionary import task does not exist",
             )
         })?;
-    Ok(Json(json!({
-        "progress": progress as f64 / IMPORT_PROGRESS_SCALE as f64,
-    })))
+    Ok(Json(progress))
 }
 
 pub(super) async fn dictionary_delete(
@@ -304,12 +379,12 @@ pub(super) async fn dictionary_delete(
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::atomic::Ordering;
     use std::sync::Arc;
 
     use super::{
-        register_import_in, valid_import_id, RegisterImportError, IMPORT_PROGRESS_SCALE,
-        MAX_IMPORT_PROGRESS_ENTRIES,
+        register_import_in, valid_import_id, ImportProgress, RegisterImportError,
+        IMPORT_PROGRESS_SCALE, MAX_IMPORT_PROGRESS_ENTRIES,
     };
 
     #[test]
@@ -337,7 +412,8 @@ mod tests {
     #[test]
     fn completed_imports_are_removed_before_registering() {
         let mut imports = HashMap::new();
-        let completed = Arc::new(AtomicU32::new(IMPORT_PROGRESS_SCALE));
+        let completed = Arc::new(ImportProgress::new());
+        completed.store(IMPORT_PROGRESS_SCALE, Ordering::Relaxed);
         imports.insert("completed".to_owned(), completed);
 
         register_import_in(&mut imports, "next").unwrap();
@@ -357,5 +433,39 @@ mod tests {
             Err(RegisterImportError::Conflict)
         ));
         assert!(Arc::ptr_eq(imports.get("same-id").unwrap(), &progress));
+    }
+
+    #[test]
+    fn failed_catalog_import_progress_is_bounded_and_can_be_retried() {
+        let mut imports = HashMap::new();
+        let failed = register_import_in(&mut imports, "failed").unwrap();
+        failed.downloading(50, 100);
+        failed.failed("dictionary.download_failed");
+        assert_eq!(failed.snapshot()["phase"], "failed");
+        assert_eq!(
+            failed.snapshot()["error_code"],
+            "dictionary.download_failed"
+        );
+        register_import_in(&mut imports, "retry").unwrap();
+        assert_eq!(imports.len(), 1);
+        assert!(imports.contains_key("retry"));
+    }
+
+    #[test]
+    fn catalog_progress_keeps_the_manual_progress_contract_and_adds_phase_bytes() {
+        let progress = ImportProgress::new();
+        assert_eq!(progress.snapshot()["phase"], "importing");
+        progress.downloading(50, 100);
+        let snapshot = progress.snapshot();
+        assert_eq!(snapshot["progress"], 0.225);
+        assert_eq!(snapshot["phase"], "downloading");
+        assert_eq!(snapshot["downloaded_bytes"], 50);
+        assert_eq!(snapshot["total_bytes"], 100);
+        progress.phase("verifying");
+        progress.store(4_500, Ordering::Relaxed);
+        assert_eq!(progress.snapshot()["progress"], 0.45);
+        progress.phase("importing");
+        progress.store(5_000, Ordering::Relaxed);
+        assert_eq!(progress.snapshot()["progress"], 0.5);
     }
 }

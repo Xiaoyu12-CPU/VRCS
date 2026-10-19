@@ -333,6 +333,16 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/dictionary", get(dictionary::dictionary_lookup))
         .route("/api/dictionaries", get(dictionary::dictionary_list))
         .route(
+            "/api/dictionaries/catalog",
+            get(dictionary::dictionary_catalog),
+        )
+        .route(
+            "/api/dictionaries/install",
+            post(dictionary::dictionary_install)
+                .layer(DefaultBodyLimit::max(1024))
+                .layer(middleware::from_fn(dictionary::limit_dictionary_import)),
+        )
+        .route(
             "/api/dictionaries/import",
             post(dictionary::dictionary_import)
                 .layer(DefaultBodyLimit::max(yomitan::MAX_ARCHIVE_BYTES))

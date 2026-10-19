@@ -934,6 +934,126 @@ fn korean_dictionary_lookup_keeps_multiple_verified_analyses_before_extra_senses
 }
 
 #[test]
+fn catalog_dictionary_import_corrects_language_metadata_without_changing_manual_imports() {
+    let (_path, database) = open_temp_db("catalog-language-metadata");
+    let db = std::sync::Mutex::new(database);
+    let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let options = zip::write::SimpleFileOptions::default();
+    writer.start_file("index.json", options).unwrap();
+    // This reproduces the upstream packages' missing sourceLanguage and
+    // incorrect targetLanguage. Only fixed-catalog installation corrects it.
+    writer
+        .write_all(br#"{"title":"Catalog Korean","revision":"1","format":3,"targetLanguage":"ko"}"#)
+        .unwrap();
+    writer.start_file("term_bank_1.json", options).unwrap();
+    writer
+        .write_all(
+            serde_json::json!([["먹다", "먹다", "", "", 10, ["eat"]]])
+                .to_string()
+                .as_bytes(),
+        )
+        .unwrap();
+    let archive = writer.finish().unwrap().into_inner();
+    for target in ["zh", "ja"] {
+        let manual = import_yomitan(&db, &archive);
+        assert_eq!(manual.source_language, "ja");
+        assert_eq!(manual.target_language.as_deref(), Some("ko"));
+        let installed = Database::import_catalog_yomitan_with_progress(
+            &db,
+            &archive,
+            "ko",
+            target,
+            |_| {},
+            || false,
+        )
+        .unwrap();
+        assert_ne!(installed.id, manual.id);
+        assert_eq!(installed.source_language, "ko");
+        assert_eq!(installed.target_language.as_deref(), Some(target));
+        let database = db.lock().unwrap();
+        assert_eq!(database.dictionary_sources().unwrap().len(), 1);
+        assert_eq!(
+            database
+                .conn
+                .query_row(
+                    "SELECT language FROM dictionary_entries WHERE source_id = ?",
+                    [installed.id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "ko"
+        );
+    }
+    // Choosing the generic ZIP importer later must still retain its metadata.
+    let manual = import_yomitan(&db, &archive);
+    assert_eq!(manual.source_language, "ja");
+    assert_eq!(manual.target_language.as_deref(), Some("ko"));
+    assert_eq!(
+        db.lock()
+            .unwrap()
+            .conn
+            .query_row(
+                "SELECT language FROM dictionary_entries WHERE source_id = ?",
+                [manual.id],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+        "ja"
+    );
+}
+
+#[test]
+fn cancelled_catalog_dictionary_replacement_preserves_the_previous_source_and_languages() {
+    let (_path, database) = open_temp_db("catalog-cancel-replacement");
+    let db = std::sync::Mutex::new(database);
+    let archive = dictionary_archive(INSERT_BATCH_SIZE + 1);
+    let previous = import_yomitan(&db, &archive);
+    let cancelled = std::cell::Cell::new(false);
+    let result = Database::import_catalog_yomitan_with_progress(
+        &db,
+        &archive,
+        "ko",
+        "zh",
+        |progress| {
+            if progress > 0.0 {
+                cancelled.set(true);
+            }
+        },
+        || cancelled.get(),
+    );
+    assert!(matches!(result, Err(crate::error::AppError::Conflict(_))));
+    let database = db.lock().unwrap();
+    let sources = database.dictionary_sources().unwrap();
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0].id, previous.id);
+    assert_eq!(sources[0].source_language, "ja");
+    assert_eq!(sources[0].target_language, previous.target_language);
+    assert_eq!(sources[0].entry_count, previous.entry_count);
+    assert_eq!(
+        database
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM dictionary_sources WHERE entry_count = 0",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        database
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM dictionary_entries WHERE language != 'ja'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
 fn escaped_prefix_lookup_uses_the_term_index() {
     let (_path, database) = open_temp_db("like-plan");
     let plan = database

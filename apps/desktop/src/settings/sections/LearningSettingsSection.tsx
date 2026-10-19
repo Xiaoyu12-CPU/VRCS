@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import type { DictionarySource } from "../../dictionary/types";
 import { DictionarySettingsSection } from "./DictionarySettingsSection";
 import { LearningAiSettingsSection } from "./LearningAiSettingsSection";
+import type { KoreanDictionaryInstallerState } from "./KoreanDictionaryInstaller";
 
 export function LearningSettingsSection({
   locale,
@@ -13,6 +14,8 @@ export function LearningSettingsSection({
   dictionaryBusy,
   dictionaryMessage,
   dictionaryProgress,
+  dictionaryMessageError,
+  dictionaryQuickInstall,
   dictionaryFileRef,
   onSelectionLookupChange,
   onChooseDictionary,
@@ -24,6 +27,8 @@ export function LearningSettingsSection({
   dictionaryBusy: boolean;
   dictionaryMessage: string;
   dictionaryProgress: number | null;
+  dictionaryMessageError: boolean;
+  dictionaryQuickInstall: KoreanDictionaryInstallerState;
   dictionaryFileRef: RefObject<HTMLInputElement | null>;
   onSelectionLookupChange: (enabled: boolean) => void;
   onChooseDictionary: (file?: File) => Promise<void>;
@@ -48,6 +53,8 @@ export function LearningSettingsSection({
           busy={dictionaryBusy}
           message={dictionaryMessage}
           progress={dictionaryProgress}
+          messageError={dictionaryMessageError}
+          quickInstall={dictionaryQuickInstall}
           fileInputRef={dictionaryFileRef}
           onSelectionLookupChange={onSelectionLookupChange}
           onChoose={onChooseDictionary}

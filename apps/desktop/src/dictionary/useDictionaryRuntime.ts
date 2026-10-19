@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import type { ReportRuntimeError } from "../core-client/useRuntimeErrors";
 import { dictionaryApi } from "./api";
-import type { DictionarySource } from "./types";
+import type { DictionaryCatalogId, DictionaryImportProgress, DictionarySource } from "./types";
 
 export function useDictionaryRuntime({
   active,
@@ -45,5 +45,16 @@ export function useDictionaryRuntime({
     await refresh();
   }, [refresh]);
 
-  return { sources, refresh, importFile, deleteById };
+  const installCatalog = useCallback(async (
+    catalogId: DictionaryCatalogId,
+    onProgress?: (progress: DictionaryImportProgress) => void,
+  ) => {
+    try {
+      return await dictionaryApi.installDictionary(catalogId, onProgress);
+    } finally {
+      await refresh();
+    }
+  }, [refresh]);
+
+  return { sources, refresh, importFile, installCatalog, deleteById };
 }

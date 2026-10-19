@@ -288,6 +288,35 @@ impl Database {
     pub fn import_yomitan_with_progress(
         db: &Mutex<Database>,
         archive: &[u8],
+        report_progress: impl FnMut(f64),
+        should_cancel: impl Fn() -> bool,
+    ) -> AppResult<DictionarySource> {
+        Self::import_yomitan_with_languages(db, archive, None, report_progress, should_cancel)
+    }
+
+    /// Only the fixed, checksum-verified catalog uses language overrides. Manual
+    /// imports retain the original metadata, including legacy defaults.
+    pub(crate) fn import_catalog_yomitan_with_progress(
+        db: &Mutex<Database>,
+        archive: &[u8],
+        source_language: &str,
+        target_language: &str,
+        report_progress: impl FnMut(f64),
+        should_cancel: impl Fn() -> bool,
+    ) -> AppResult<DictionarySource> {
+        Self::import_yomitan_with_languages(
+            db,
+            archive,
+            Some((source_language, target_language)),
+            report_progress,
+            should_cancel,
+        )
+    }
+
+    fn import_yomitan_with_languages(
+        db: &Mutex<Database>,
+        archive: &[u8],
+        languages: Option<(&str, &str)>,
         mut report_progress: impl FnMut(f64),
         should_cancel: impl Fn() -> bool,
     ) -> AppResult<DictionarySource> {
@@ -304,7 +333,11 @@ impl Database {
         };
         check_cancelled()?;
         report_progress(0.0);
-        let importer = YomitanImporter::new(archive).map_err(AppError::validation)?;
+        let mut importer = YomitanImporter::new(archive).map_err(AppError::validation)?;
+        if let Some((source_language, target_language)) = languages {
+            importer.metadata.source_language = source_language.to_owned();
+            importer.metadata.target_language = Some(target_language.to_owned());
+        }
         let staged_id = lock()?.stage_dictionary_source(&importer.metadata)?;
         let result = (|| {
             let mut records = Vec::with_capacity(INSERT_BATCH_SIZE);

@@ -5,6 +5,7 @@ import { BookOpen, Trash2, Upload } from "lucide-react";
 import { ConfirmDialog } from "../../app/components/ConfirmDialog";
 import type { DictionarySource } from "../../dictionary/types";
 import { PreferenceToggle } from "../SettingsControls";
+import { KoreanDictionaryInstaller, type KoreanDictionaryInstallerState } from "./KoreanDictionaryInstaller";
 
 export function DictionarySettingsSection({
   locale,
@@ -13,6 +14,8 @@ export function DictionarySettingsSection({
   busy,
   message,
   progress,
+  messageError = false,
+  quickInstall,
   fileInputRef,
   onSelectionLookupChange,
   onChoose,
@@ -24,6 +27,8 @@ export function DictionarySettingsSection({
   busy: boolean;
   message: string;
   progress: number | null;
+  messageError?: boolean;
+  quickInstall: KoreanDictionaryInstallerState;
   fileInputRef: RefObject<HTMLInputElement | null>;
   onSelectionLookupChange: (enabled: boolean) => void;
   onChoose: (file?: File) => Promise<void>;
@@ -73,6 +78,7 @@ export function DictionarySettingsSection({
               onChange={onSelectionLookupChange}
             />
           </div>
+          <KoreanDictionaryInstaller {...quickInstall} busy={dictionaryBusy} />
           {dictionaries.length ? (
             <div className="dictionary-source-list">
               {dictionaries.map((dictionary) => (
@@ -108,7 +114,7 @@ export function DictionarySettingsSection({
               onConfirm={confirmRemoval}
             />
           )}
-          {dictionaryMessage && <p className="dictionary-feedback" role="status">{dictionaryMessage}</p>}
+          {dictionaryMessage && <p className={`dictionary-feedback${messageError ? " error" : ""}`} role={messageError ? "alert" : "status"}>{dictionaryMessage}</p>}
           {dictionaryBusy && dictionaryProgress !== null && progressPercentage !== null && (
             <div className="dictionary-import-progress">
               <div
