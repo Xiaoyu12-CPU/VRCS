@@ -81,6 +81,18 @@ struct NativeUiState {
 const DEFAULT_CORE_PORT: u16 = 8766;
 const VRCX_REPOSITORY_URL: &str = "https://github.com/Map1en/VRCX-0";
 
+fn data_directory_name_for_preview(preview: bool) -> &'static str {
+    if preview {
+        ".vrcs-korean-preview"
+    } else {
+        ".vrcs"
+    }
+}
+
+pub(crate) fn data_directory_name() -> &'static str {
+    data_directory_name_for_preview(option_env!("VRCS_PREVIEW") == Some("1"))
+}
+
 fn available_port() -> u16 {
     TcpListener::bind(("127.0.0.1", 0))
         .and_then(|listener| listener.local_addr())
@@ -546,7 +558,7 @@ pub fn run() {
             }
             tray.build(app)?;
 
-            let data_dir = app.path().local_data_dir()?.join(".vrcs");
+            let data_dir = app.path().local_data_dir()?.join(data_directory_name());
             std::fs::create_dir_all(data_dir.join("models"))?;
 
             let port = setup_connection
@@ -657,9 +669,25 @@ pub fn release_self_test() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{core_connection_config, DEFAULT_CORE_PORT};
+    use super::{
+        core_connection_config, data_directory_name, data_directory_name_for_preview,
+        DEFAULT_CORE_PORT,
+    };
 
     const CAPABILITIES: &str = include_str!("../capabilities/default.json");
+
+    #[test]
+    fn preview_data_directory_is_independent_from_the_standard_build() {
+        assert_eq!(data_directory_name_for_preview(false), ".vrcs");
+        assert_eq!(
+            data_directory_name_for_preview(true),
+            ".vrcs-korean-preview"
+        );
+        assert_eq!(
+            data_directory_name(),
+            data_directory_name_for_preview(option_env!("VRCS_PREVIEW") == Some("1"))
+        );
+    }
 
     #[test]
     fn custom_window_actions_are_allowed() {

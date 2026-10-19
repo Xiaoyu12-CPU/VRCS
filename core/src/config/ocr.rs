@@ -59,6 +59,7 @@ pub struct VrOcrConfig {
     pub desktop_enabled: bool,
     pub shortcut: String,
     pub device: OcrDevice,
+    pub recognition_language: OcrRecognitionLanguage,
     pub display_mode: VrOcrDisplayMode,
     pub timeout_seconds: u32,
     pub minimum_confidence: f32,
@@ -137,6 +138,16 @@ pub enum OcrDevice {
     Directml,
 }
 
+/// Selects a recognizer and its matching character dictionary, independently of
+/// translation targets. Older settings keep the existing PP-OCRv6 recognizer.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OcrRecognitionLanguage {
+    #[default]
+    Multilingual,
+    Korean,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VrOcrDisplayMode {
@@ -153,6 +164,7 @@ impl Default for VrOcrConfig {
             desktop_enabled: false,
             shortcut: "Ctrl+Alt+O".into(),
             device: OcrDevice::Cpu,
+            recognition_language: OcrRecognitionLanguage::Multilingual,
             display_mode: VrOcrDisplayMode::Stereo,
             timeout_seconds: 30,
             minimum_confidence: 0.6,
@@ -163,5 +175,30 @@ impl Default for VrOcrConfig {
             background_opacity: 1.0,
             wrist: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ocr_recognition_language_defaults_for_legacy_settings_and_round_trips() {
+        let legacy: VrOcrConfig = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(
+            legacy.recognition_language,
+            OcrRecognitionLanguage::Multilingual
+        );
+        let korean: VrOcrConfig =
+            serde_json::from_value(serde_json::json!({"recognition_language":"korean"})).unwrap();
+        assert_eq!(korean.recognition_language, OcrRecognitionLanguage::Korean);
+        assert_eq!(
+            serde_json::from_value::<VrOcrConfig>(serde_json::to_value(&korean).unwrap()).unwrap(),
+            korean
+        );
+        assert!(serde_json::from_value::<VrOcrConfig>(
+            serde_json::json!({"recognition_language":"invalid"})
+        )
+        .is_err());
     }
 }

@@ -54,7 +54,7 @@ pub(crate) fn desktop_log_dir() -> PathBuf {
     std::env::var("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(|_| std::env::temp_dir().join("VRCS"))
-        .join(".vrcs")
+        .join(crate::data_directory_name())
         .join("logs")
 }
 
@@ -321,7 +321,13 @@ pub(crate) fn export_error_report(
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{clean_identifier, clean_log_text, recent_log_files};
+    use super::{clean_identifier, clean_log_text, desktop_log_dir, recent_log_files};
+
+    #[test]
+    fn diagnostic_logs_follow_the_active_builds_data_directory() {
+        assert!(desktop_log_dir()
+            .ends_with(std::path::Path::new(crate::data_directory_name()).join("logs")));
+    }
 
     #[test]
     fn diagnostic_text_is_bounded_and_sensitive_values_are_rejected() {

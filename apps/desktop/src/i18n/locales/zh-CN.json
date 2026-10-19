@@ -507,6 +507,7 @@
       "dialogLabel": "{{term}} 的词典解释",
       "close": "关闭词典",
       "noDefinitions": "已导入的词典中暂无释义。",
+      "ambiguousKoreanForms": "存在多种可能原形，请结合原句判断。",
       "context": "原始语境",
       "learning": {
         "add": "加入学习",
@@ -786,6 +787,9 @@
         "displayMode": "VR 结果显示方式",
         "displayModes": { "wrist": "手腕面板", "stereo": "原文字位置（左右眼）" },
         "device": "本地 OCR 推理设备",
+        "recognitionLanguage": "画面文字语言",
+        "recognitionLanguageDescription": "进入韩语世界时选择韩语，并下载对应模型。此选项控制识字，翻译语言在下方单独设置。韩语模式识别韩文和英文；中日文请切回多语言模式。",
+        "recognitionLanguages": {"multilingual": "中文、日文及拉丁字母语言", "korean": "韩语（含英文）"},
         "deviceDescription": "DirectML 使用 Windows 上的兼容 GPU。GPU 加载或识别失败时，OCR 会自动回退 CPU。",
         "activeDevice": "最近使用的设备：{{device}}",
         "cpuFallback": "DirectML 失败，OCR 已切换到 CPU。",

@@ -32,6 +32,8 @@ Core 默认构建和 `--no-default-features` 均支持云端功能和托管 Qwen
 
 Windows 构建的本地 PP-OCRv6 small 支持 ONNX Runtime DirectML，无需 CUDA 或 Vulkan SDK。`ocr.device` 默认为 `cpu`，设为 `directml` 时会优先选择高性能兼容 GPU；模型加载或推理失败后回退 CPU。回退后的 CPU 会话保持使用，直到切换推理设备或重新启动服务。`GET /api/ocr/runtime` 返回最近请求的设备、实际加载的设备和回退原因。其他平台会回退 CPU。
 
+`ocr.recognition_language` 默认为 `multilingual`，兼容旧配置与原 PP-OCRv6 small 目录；设为 `korean` 时使用该目录下 `korean/` 中的官方韩语 PP-OCRv5 recognizer、配套字库及 PP-OCRv6 detector。`/api/ocr/models`、`/api/ocr/models/download` 的 `language` 查询参数分别控制哪组模型的状态、下载与删除，省略时保持原多语言行为。两组模型独立校验和删除；识别模式切换会重载会话并使进行中的旧配置扫描失效。
+
 ## 运行与测试
 
 在 Windows 上安装 Rustup、Visual Studio C++ Build Tools，并将 CMake 加入 `PATH`。Rustup 会使用仓库根目录 `rust-toolchain.toml` 指定的版本和组件。CPU 和 Vulkan 构建均无需 GPU SDK。从仓库根目录的 PowerShell 开始：

@@ -117,6 +117,7 @@ export const DEFAULT_OCR_SETTINGS: VrOcrSettings = {
   desktop_enabled: false,
   shortcut: "Ctrl+Alt+O",
   device: "cpu",
+  recognition_language: "multilingual",
   display_mode: "stereo",
   timeout_seconds: 30,
   minimum_confidence: 0.6,

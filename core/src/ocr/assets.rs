@@ -1,3 +1,4 @@
+use crate::config::OcrRecognitionLanguage;
 use futures_util::StreamExt;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -34,6 +35,30 @@ const ASSETS: [Asset; 3] = [
     },
 ];
 
+// Official PaddlePaddle ONNX export, paired with the exact upstream dictionary.
+// Both are Apache-2.0. Keep the detector shared in definition, but each bundle
+// lives in its own directory so deleting one cannot invalidate the other.
+const KOREAN_ASSETS: [Asset; 3] = [
+    Asset {
+        name: "det.onnx",
+        url: ASSETS[0].url,
+        bytes: ASSETS[0].bytes,
+        sha256: ASSETS[0].sha256,
+    },
+    Asset {
+        name: "rec.onnx",
+        url: "https://huggingface.co/PaddlePaddle/korean_PP-OCRv5_mobile_rec_onnx/resolve/5c6f574b8e2230adf4287b33e736d71b9fabd28e/inference.onnx",
+        bytes: 13_418_787,
+        sha256: "92f0b7785e64fc9090106a241cf4c1eb97472824558272751b88a2a4476d3a08",
+    },
+    Asset {
+        name: "dict.txt",
+        url: "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/b03f46425e8ff4442b268ce449e3eef758146cd4/ppocr/utils/dict/ppocrv5_korean_dict.txt",
+        bytes: 47_451,
+        sha256: "a88071c68c01707489baa79ebe0405b7beb5cca229f4fc94cc3ef992328802d7",
+    },
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelState {
@@ -45,6 +70,7 @@ pub enum ModelState {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ModelStatus {
+    pub recognition_language: OcrRecognitionLanguage,
     pub state: ModelState,
     pub downloaded_bytes: u64,
     pub total_bytes: u64,
@@ -54,6 +80,7 @@ pub struct ModelStatus {
 #[derive(Clone)]
 pub(super) struct ModelAssets {
     pub directory: PathBuf,
+    recognition_language: OcrRecognitionLanguage,
     status: Arc<RwLock<ModelStatus>>,
     prepare_lock: Arc<tokio::sync::Mutex<()>>,
     download_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
@@ -61,12 +88,21 @@ pub(super) struct ModelAssets {
 
 impl ModelAssets {
     pub fn new(directory: PathBuf) -> Self {
+        Self::for_language(directory, OcrRecognitionLanguage::Multilingual)
+    }
+
+    pub fn for_language(directory: PathBuf, recognition_language: OcrRecognitionLanguage) -> Self {
         Self {
             directory,
+            recognition_language,
             status: Arc::new(RwLock::new(ModelStatus {
+                recognition_language,
                 state: ModelState::Missing,
                 downloaded_bytes: 0,
-                total_bytes: ASSETS.iter().map(|asset| asset.bytes).sum(),
+                total_bytes: assets_for(recognition_language)
+                    .iter()
+                    .map(|asset| asset.bytes)
+                    .sum(),
                 error: None,
             })),
             prepare_lock: Arc::new(tokio::sync::Mutex::new(())),
@@ -166,7 +202,7 @@ impl ModelAssets {
             status.downloaded_bytes = 0;
             status.error = None;
         }
-        for asset in &ASSETS {
+        for asset in assets_for(self.recognition_language) {
             let path = self.directory.join(asset.name);
             for file in [&path, &path.with_extension("download.tmp")] {
                 match std::fs::remove_file(file) {
@@ -181,7 +217,7 @@ impl ModelAssets {
 
     fn verified_bytes(&self) -> Result<u64, String> {
         let mut bytes = 0;
-        for asset in &ASSETS {
+        for asset in assets_for(self.recognition_language) {
             if verify_file(&self.directory.join(asset.name), asset)? {
                 bytes += asset.bytes;
             }
@@ -190,7 +226,12 @@ impl ModelAssets {
     }
 
     pub fn verify(&self) -> Result<(), String> {
-        if self.verified_bytes()? != ASSETS.iter().map(|asset| asset.bytes).sum::<u64>() {
+        if self.verified_bytes()?
+            != assets_for(self.recognition_language)
+                .iter()
+                .map(|asset| asset.bytes)
+                .sum::<u64>()
+        {
             return Err(
                 "OCR models are missing or invalid; download the local models in settings".into(),
             );
@@ -206,7 +247,7 @@ impl ModelAssets {
             .timeout(std::time::Duration::from_secs(180))
             .build()
             .map_err(|_| "Could not create the OCR model download client")?;
-        for asset in &ASSETS {
+        for asset in assets_for(self.recognition_language) {
             let path = self.directory.join(asset.name);
             let check_path = path.clone();
             if tokio::task::spawn_blocking(move || verify_file(&check_path, asset))
@@ -285,6 +326,13 @@ impl ModelAssets {
             .write()
             .unwrap_or_else(|error| error.into_inner());
         status.downloaded_bytes += bytes;
+    }
+}
+
+fn assets_for(language: OcrRecognitionLanguage) -> &'static [Asset; 3] {
+    match language {
+        OcrRecognitionLanguage::Multilingual => &ASSETS,
+        OcrRecognitionLanguage::Korean => &KOREAN_ASSETS,
     }
 }
 

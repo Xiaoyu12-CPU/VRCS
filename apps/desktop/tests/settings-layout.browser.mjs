@@ -7,11 +7,11 @@ import test from "node:test";
 import { build } from "esbuild";
 
 const testDirectory = dirname(fileURLToPath(import.meta.url));
-const browser = [process.env.PROGRAMFILES, process.env["PROGRAMFILES(X86)"], process.env.LOCALAPPDATA]
+const browser = [...[process.env.PROGRAMFILES, process.env["PROGRAMFILES(X86)"], process.env.LOCALAPPDATA]
   .filter(Boolean).flatMap(root => [
     join(root, "Google/Chrome/Application/chrome.exe"),
     join(root, "Microsoft/Edge/Application/msedge.exe"),
-  ]).find(existsSync);
+  ]), "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].find(existsSync);
 
 for (const width of [1200, 380]) {
   test(`settings controls align and group spacing stays compact at ${width}px`, {
@@ -50,8 +50,8 @@ for (const width of [1200, 380]) {
           models: [], modelsLoading: false, modelsError: 'The model catalog could not be loaded. Check the connection and try again.',
           explanationLanguagePreference: 'ui', setProfileId: noop, setModel: noop,
           setExplanationLanguage: noop, setExplanationLevel: noop, setReasoningControl: noop };
-        window.fetch = async url => String(url).endsWith('/ocr/models')
-          ? new Response(JSON.stringify({ state: 'ready', downloaded_bytes: 100, total_bytes: 100, error: null }))
+        window.fetch = async url => String(url).includes('/ocr/models')
+          ? new Response(JSON.stringify({ recognition_language: 'multilingual', state: 'ready', downloaded_bytes: 100, total_bytes: 100, error: null }))
           : String(url).endsWith('/ocr/runtime')
             ? new Response(JSON.stringify({ requested_device: 'cpu', active_device: null, fallback_reason: null }))
             : new Response(JSON.stringify({ code: 'models.unavailable', detail: 'Catalog unavailable', params: {} }), { status: 503 });

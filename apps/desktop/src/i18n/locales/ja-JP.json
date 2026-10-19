@@ -507,6 +507,7 @@
       "dialogLabel": "{{term}} の辞書定義",
       "close": "辞書を閉じる",
       "noDefinitions": "インポート済みの辞書に定義がありません。",
+      "ambiguousKoreanForms": "原形の候補が複数あります。元の文脈から判断してください。",
       "context": "元の文脈",
       "learning": {
         "add": "学習に追加",
@@ -786,6 +787,9 @@
         "displayMode": "VR 結果の表示方法",
         "displayModes": { "wrist": "手首パネル", "stereo": "元の文字位置（両眼）" },
         "device": "ローカル OCR の推論デバイス",
+        "recognitionLanguage": "画像内の文字の言語",
+        "recognitionLanguageDescription": "韓国語のワールドでは韓国語を選び、対応モデルをダウンロードしてください。翻訳先の言語は下で別に設定します。韓国語モードは韓国語と英語に対応します。中国語・日本語は多言語モードに切り替えてください。",
+        "recognitionLanguages": {"multilingual": "中国語・日本語・ラテン文字の言語", "korean": "韓国語（英語を含む）"},
         "deviceDescription": "DirectML は Windows 上の対応 GPU を使用します。GPU の読み込みや認識に失敗した場合、OCR は CPU に切り替わります。",
         "activeDevice": "最後に使用したデバイス：{{device}}",
         "cpuFallback": "DirectML に失敗したため、OCR は CPU に切り替わりました。",

@@ -694,6 +694,245 @@ fn dictionary_lookup_ranks_shorter_prefixes_first_and_deinflects_queries() {
     assert_eq!(database.lookup("running", 5).unwrap()[0].term, "run");
 }
 
+fn korean_lookup_archive(entries: serde_json::Value) -> Vec<u8> {
+    let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let options = zip::write::SimpleFileOptions::default();
+    writer.start_file("index.json", options).unwrap();
+    // Old packages omit sourceLanguage and are labelled ja by the importer.
+    // Korean lookup must validate headwords without excluding these packages.
+    writer
+        .write_all(br#"{"title":"KoreanLookupDict","revision":"1","format":3}"#)
+        .unwrap();
+    writer.start_file("term_bank_1.json", options).unwrap();
+    writer.write_all(entries.to_string().as_bytes()).unwrap();
+    writer.finish().unwrap().into_inner()
+}
+
+#[test]
+fn korean_dictionary_lookup_restores_verified_lemmas_and_prioritizes_exact_words() {
+    let (_path, database) = open_temp_db("korean-lookup");
+    let db = std::sync::Mutex::new(database);
+    let terms = [
+        "먹다",
+        "좋다",
+        "있다",
+        "없다",
+        "이다",
+        "가다",
+        "하다",
+        "공부하다",
+        "보다",
+        "오다",
+        "주다",
+        "되다",
+        "마시다",
+        "계시다",
+        "주무시다",
+        "사과",
+        "책",
+        "학교",
+        "한국어",
+        "집",
+        "친구",
+        "학생",
+        "사람",
+        "나",
+        "먹",
+        "먹으",
+        "가",
+        "마다",
+        "말다",
+        "나다",
+        "돕다",
+        "고맙다",
+        "모르다",
+        "부르다",
+        "다르다",
+        "예쁘다",
+        "바쁘다",
+        "아프다",
+    ];
+    let mut records = terms
+        .iter()
+        .map(|term| serde_json::json!([term, term, "", "", 10, [format!("definition of {term}")]]))
+        .collect::<Vec<_>>();
+    records.push(serde_json::json!([
+        "影",
+        "먹었어요",
+        "",
+        "",
+        1000,
+        ["unrelated exact reading"]
+    ]));
+    records.push(serde_json::json!([
+        "食",
+        "먹다",
+        "",
+        "",
+        1000,
+        ["unrelated candidate reading"]
+    ]));
+    import_yomitan(
+        &db,
+        &korean_lookup_archive(serde_json::Value::Array(records)),
+    );
+    let database = db.into_inner().unwrap();
+
+    assert_eq!(
+        database.dictionary_sources().unwrap()[0].source_language,
+        "ja"
+    );
+    for (query, expected) in [
+        ("먹어요", "먹다"),
+        ("먹었어요", "먹다"),
+        ("먹었습니다", "먹다"),
+        ("있어요", "있다"),
+        ("없어요", "없다"),
+        ("있습니다", "있다"),
+        ("있다", "있다"),
+        ("좋았어요", "좋다"),
+        ("갑니다", "가다"),
+        ("해요", "하다"),
+        ("공부했어요", "공부하다"),
+        ("봤어요", "보다"),
+        ("왔어요", "오다"),
+        ("줘요", "주다"),
+        ("됐어요", "되다"),
+        ("마셨어요", "마시다"),
+        ("마세요", "말다"),
+        ("마십시오", "말다"),
+        ("먹으세요", "먹다"),
+        ("가세요", "가다"),
+        ("계세요", "계시다"),
+        ("주무세요", "주무시다"),
+        ("먹고", "먹다"),
+        ("먹지만", "먹다"),
+        ("먹으면", "먹다"),
+        ("먹어서", "먹다"),
+        ("해서", "하다"),
+        ("사과는", "사과"),
+        ("책을", "책"),
+        ("학교에서", "학교"),
+        ("한국어로", "한국어"),
+        ("집으로", "집"),
+        ("친구에게는", "친구"),
+        ("학생입니다", "학생"),
+        ("학생이에요", "학생"),
+        ("학생이었어요", "학생"),
+        ("친구예요", "친구"),
+        ("친구였어요", "친구"),
+        ("사람들이", "사람"),
+        ("나는", "나"),
+        ("도와요", "돕다"),
+        ("고마워요", "고맙다"),
+        ("몰라요", "모르다"),
+        ("불러요", "부르다"),
+        ("달라요", "다르다"),
+        ("예뻐요", "예쁘다"),
+        ("바빠요", "바쁘다"),
+        ("아파요", "아프다"),
+    ] {
+        let entries = database.lookup(query, 10).unwrap();
+        assert!(
+            entries.iter().all(|entry| entry.language == "ko"),
+            "{query}"
+        );
+        assert_eq!(
+            entries.first().map(|entry| entry.term.as_str()),
+            Some(expected),
+            "{query}: {entries:?}"
+        );
+    }
+    assert_eq!(
+        database.lookup(" “먹었어요!” ", 10).unwrap()[0].term,
+        "먹다"
+    );
+    assert_eq!(database.lookup("가", 10).unwrap()[0].term, "가");
+    assert_eq!(database.lookup("가", 10).unwrap()[0].language, "ko");
+    assert_eq!(
+        database.dictionary_sources().unwrap()[0].source_language,
+        "ja"
+    );
+    assert!(database.lookup("먹었어요", 0).unwrap().is_empty());
+    assert!(database.lookup("없는단어였어요", 10).unwrap().is_empty());
+    assert!(database
+        .lookup("마셨어요", 10)
+        .unwrap()
+        .iter()
+        .all(|entry| entry.term != "마다"));
+    for query in ["마세요", "마십시오"] {
+        let entries = database.lookup(query, 10).unwrap();
+        assert!(!entries.is_empty());
+        assert!(
+            entries.iter().all(|entry| entry.term == "말다"),
+            "{query}: {entries:?}"
+        );
+    }
+
+    database
+        .conn
+        .execute(
+            "INSERT INTO dictionary (term, language, definition) VALUES (?, 'ko', 'exact form')",
+            ["먹었어요"],
+        )
+        .unwrap();
+    assert_eq!(database.lookup("먹었어요", 10).unwrap()[0].term, "먹었어요");
+    assert_eq!(
+        database.lookup("먹었어요!", 10).unwrap()[0].term,
+        "먹었어요"
+    );
+}
+
+#[test]
+fn korean_dictionary_lookup_keeps_multiple_verified_analyses_before_extra_senses() {
+    let (_path, database) = open_temp_db("korean-ambiguous-lookup");
+    let db = std::sync::Mutex::new(database);
+    let mut records = (0..12)
+        .map(|index| serde_json::json!(["들다", "들다", "", "", 100, [format!("sense {index}")]]))
+        .collect::<Vec<_>>();
+    for term in ["듣다", "걸다", "걷다", "물다", "묻다", "사다", "살다"] {
+        records.push(serde_json::json!([term, term, "", "", 10, [term]]));
+    }
+    records.push(serde_json::json!([
+        "聞",
+        "듣다",
+        "",
+        "",
+        1000,
+        ["reading must not count"]
+    ]));
+    import_yomitan(
+        &db,
+        &korean_lookup_archive(serde_json::Value::Array(records)),
+    );
+    let database = db.into_inner().unwrap();
+    for (query, expected) in [
+        ("들어요", ["들다", "듣다"]),
+        ("걸어요", ["걸다", "걷다"]),
+        ("물어요", ["물다", "묻다"]),
+        ("삽니다", ["사다", "살다"]),
+    ] {
+        for limit in [2, 3, 5, 10] {
+            let entries = database.lookup(query, limit).unwrap();
+            let terms = entries
+                .iter()
+                .map(|entry| entry.term.as_str())
+                .collect::<Vec<_>>();
+            assert!(terms.len() <= limit as usize);
+            assert_eq!(&terms[..2], expected, "{query} at limit {limit}");
+        }
+    }
+    // The old truncation fallback must not return an unrelated bare stem.
+    database
+        .conn
+        .execute(
+            "INSERT INTO dictionary (term, language, definition) VALUES ('멍', 'ko', 'bruise')",
+            [],
+        )
+        .unwrap();
+    assert!(database.lookup("멍었어요", 10).unwrap().is_empty());
+}
+
 #[test]
 fn escaped_prefix_lookup_uses_the_term_index() {
     let (_path, database) = open_temp_db("like-plan");

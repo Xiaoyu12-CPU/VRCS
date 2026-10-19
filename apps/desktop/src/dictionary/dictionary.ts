@@ -1,5 +1,7 @@
 import type { DictionaryEntry } from "./types";
 
+const HANGUL_PATTERN = /\p{Script=Hangul}/u;
+
 export function definitionGlosses(definition: string): string[] {
   const normalized = definition.replace(/([①②③④⑤⑥⑦⑧⑨⑩])/g, "\n$1");
   const parts = normalized
@@ -20,6 +22,7 @@ export function groupDictionaryEntries(entries: DictionaryEntry[]): DictionaryEn
       entry.reading ?? "",
       entry.language,
       glosses,
+      HANGUL_PATTERN.test(entry.term) ? entry.term : null,
     ]);
     if (variants.has(variantKey)) continue;
     variants.add(variantKey);
@@ -43,6 +46,12 @@ export function groupDictionaryEntries(entries: DictionaryEntry[]): DictionaryEn
   }));
 }
 
+export function hasAmbiguousKoreanHeadwords(term: string, entries: DictionaryEntry[]): boolean {
+  return HANGUL_PATTERN.test(term)
+    && !entries.some((entry) => entry.term === term)
+    && new Set(entries.map((entry) => entry.term)).size > 1;
+}
+
 interface AnkiDictionaryContent {
   definition: string;
   dictionary: string | null;
@@ -51,13 +60,15 @@ interface AnkiDictionaryContent {
 export function ankiDictionaryContent(
   entries: DictionaryEntry[],
   builtInLabel = "内置词典",
+  lookupTerm = entries[0]?.term,
 ): AnkiDictionaryContent {
   const sources = new Set<string>();
-  const primaryTerm = entries[0]?.term;
+  const includeHeadwords = entries.some((entry) => entry.term !== lookupTerm);
   const sections = entries.map((entry) => {
     const source = entry.dictionary || builtInLabel;
     sources.add(source);
-    const variant = entry.term !== primaryTerm ? ` · ${entry.term}` : "";
+    const reading = entry.reading && entry.reading !== entry.term ? ` (${entry.reading})` : "";
+    const variant = includeHeadwords ? ` · ${entry.term}${reading}` : "";
     const glosses = definitionGlosses(entry.definition)
       .map((gloss, index) => `${index + 1}. ${gloss}`)
       .join("\n");

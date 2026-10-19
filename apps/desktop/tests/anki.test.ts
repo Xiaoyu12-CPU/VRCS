@@ -30,7 +30,7 @@ test("collects every displayed dictionary definition for the Anki back field", (
 
   assert.equal(
     content.definition,
-    "【日中词典】\n1. 方便\n2. 有用\n\n【汉字词典 · 便】\n1. 消息\n2. 便利",
+    "【日中词典 · 便利 (べんり)】\n1. 方便\n2. 有用\n\n【汉字词典 · 便 (べん)】\n1. 消息\n2. 便利",
   );
   assert.equal(content.dictionary, "日中词典 · 汉字词典");
 });

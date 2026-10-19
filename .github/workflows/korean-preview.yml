@@ -1,0 +1,46 @@
+name: Korean Preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/korean-support-20261019
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    uses: ./.github/workflows/ci.yml
+
+  windows-preview:
+    needs: validate
+    runs-on: windows-2022
+    env:
+      CMAKE_GENERATOR: Visual Studio 17 2022
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.build
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install pinned Rust toolchain
+        shell: pwsh
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            core -> ../.build
+            apps/desktop/src-tauri -> ../../../.build
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Build independent Korean preview
+        shell: pwsh
+        run: ./scripts/build-korean-preview.ps1
+      - uses: actions/upload-artifact@v6
+        with:
+          name: VRCS-Korean-Preview-windows-x64
+          path: release-artifacts/VRCS-Korean-Preview-*
+          if-no-files-found: error
+          retention-days: 30

@@ -202,6 +202,18 @@ fn wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+#[cfg(any(windows, test))]
+fn namespaced_target(target_name: &str, preview: bool) -> String {
+    if preview {
+        format!(
+            "VRCS-Korean-Preview/{}",
+            target_name.strip_prefix("VRCS/").unwrap_or(target_name)
+        )
+    } else {
+        target_name.to_owned()
+    }
+}
+
 #[cfg(windows)]
 fn read_stored(target_name: &str) -> Result<Option<String>, String> {
     use windows::core::PCWSTR;
@@ -209,7 +221,10 @@ fn read_stored(target_name: &str) -> Result<Option<String>, String> {
         CredFree, CredReadW, CREDENTIALW, CRED_TYPE_GENERIC,
     };
 
-    let target = wide(target_name);
+    let target = wide(&namespaced_target(
+        target_name,
+        option_env!("VRCS_PREVIEW") == Some("1"),
+    ));
     let mut credential: *mut CREDENTIALW = std::ptr::null_mut();
     if let Err(error) = unsafe {
         CredReadW(
@@ -247,7 +262,10 @@ fn write_stored(target_name: &str, value: &str) -> Result<(), String> {
         CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
     };
 
-    let mut target = wide(target_name);
+    let mut target = wide(&namespaced_target(
+        target_name,
+        option_env!("VRCS_PREVIEW") == Some("1"),
+    ));
     let mut username = wide("VRCS");
     let mut blob = value.as_bytes().to_vec();
     let credential = CREDENTIALW {
@@ -268,7 +286,10 @@ fn delete_stored(target_name: &str) -> Result<(), String> {
     use windows::core::PCWSTR;
     use windows::Win32::Security::Credentials::{CredDeleteW, CRED_TYPE_GENERIC};
 
-    let target = wide(target_name);
+    let target = wide(&namespaced_target(
+        target_name,
+        option_env!("VRCS_PREVIEW") == Some("1"),
+    ));
     match unsafe { CredDeleteW(PCWSTR(target.as_ptr()), CRED_TYPE_GENERIC, None) } {
         Ok(()) => Ok(()),
         Err(error) if error.code().0 == 0x80070490u32 as i32 => Ok(()),
@@ -294,6 +315,37 @@ fn delete_stored(_target_name: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_credentials_isolate_current_legacy_and_integration_targets() {
+        for (standard, preview) in [
+            (target("profile"), "VRCS-Korean-Preview/API/profile/profile"),
+            (
+                old_profile_target("profile"),
+                "VRCS-Korean-Preview/ASR/profile/profile",
+            ),
+            (
+                legacy_target("legacy-alibaba-cloud", ALIBABA_PROVIDER).unwrap(),
+                "VRCS-Korean-Preview/ASR/qwen",
+            ),
+            (
+                legacy_target("legacy-openai", OPENAI_PROVIDER).unwrap(),
+                "VRCS-Korean-Preview/ASR/openai",
+            ),
+            (
+                EXTERNAL_API_TARGET.to_owned(),
+                "VRCS-Korean-Preview/ExternalAPI/token",
+            ),
+            (
+                VRCX_TARGET.to_owned(),
+                "VRCS-Korean-Preview/VRCXIntegration/token",
+            ),
+        ] {
+            assert_eq!(namespaced_target(&standard, false), standard);
+            assert_eq!(namespaced_target(&standard, true), preview);
+            assert_ne!(preview, standard);
+        }
+    }
 
     #[test]
     fn accepts_all_supported_providers() {

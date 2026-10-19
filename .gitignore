@@ -52,6 +52,7 @@ target/
 /.cu-*/
 apps/desktop/src-tauri/gen/
 apps/desktop/src-tauri/tauri.release.generated.conf.json
+apps/desktop/src-tauri/tauri.preview.generated.conf.json
 core/build-release/
 core/dist-release/
 apps/desktop/src-tauri/binaries/

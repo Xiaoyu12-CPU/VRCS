@@ -507,6 +507,7 @@
       "dialogLabel": "Dictionary definition for {{term}}",
       "close": "Close dictionary",
       "noDefinitions": "No definition was found in imported dictionaries.",
+      "ambiguousKoreanForms": "Several dictionary forms are possible. Check the original sentence to choose the right one.",
       "context": "Original context",
       "learning": {
         "add": "Add to learning",
@@ -786,6 +787,9 @@
         "displayMode": "VR result display",
         "displayModes": { "wrist": "Wrist panel", "stereo": "Original text position (both eyes)" },
         "device": "Local OCR device",
+        "recognitionLanguage": "Language of text in the image",
+        "recognitionLanguageDescription": "Choose Korean for Korean worlds and download its models. This controls text recognition; set translation languages separately below. Korean mode reads Korean and English. Switch back to multilingual for Chinese or Japanese.",
+        "recognitionLanguages": {"multilingual": "Chinese, Japanese and Latin-script languages", "korean": "Korean (including English)"},
         "deviceDescription": "DirectML uses a compatible GPU on Windows. If GPU loading or recognition fails, OCR falls back to CPU.",
         "activeDevice": "Last used device: {{device}}",
         "cpuFallback": "DirectML failed. OCR has switched to CPU.",

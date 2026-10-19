@@ -1,6 +1,6 @@
 use super::assets::{ModelAssets, ModelStatus};
 use super::{processors, OcrImage, OcrImageData, Phase, TextBlock};
-use crate::config::OcrDevice;
+use crate::config::{OcrDevice, OcrRecognitionLanguage};
 use ort::session::{RunOptions, Session};
 use ort::value::Value;
 use serde::Serialize;
@@ -17,6 +17,7 @@ pub(crate) struct OcrExecutionStatus {
 
 pub(crate) struct LocalOcrRuntime {
     assets: ModelAssets,
+    korean_assets: ModelAssets,
     engine: Arc<Mutex<Option<Engine>>>,
     inference_gate: Arc<tokio::sync::Semaphore>,
     execution: Arc<RwLock<OcrExecutionStatus>>,
@@ -30,6 +31,10 @@ enum InferenceUpdate {
 impl LocalOcrRuntime {
     pub fn new(directory: PathBuf) -> Self {
         Self {
+            korean_assets: ModelAssets::for_language(
+                directory.join("korean"),
+                OcrRecognitionLanguage::Korean,
+            ),
             assets: ModelAssets::new(directory),
             engine: Arc::new(Mutex::new(None)),
             inference_gate: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -44,26 +49,40 @@ impl LocalOcrRuntime {
             .clone()
     }
 
-    pub async fn model_status(&self) -> Result<ModelStatus, String> {
-        self.assets.status().await
+    fn assets_for(&self, language: OcrRecognitionLanguage) -> &ModelAssets {
+        match language {
+            OcrRecognitionLanguage::Multilingual => &self.assets,
+            OcrRecognitionLanguage::Korean => &self.korean_assets,
+        }
     }
 
-    pub fn download_models(&self) -> Result<ModelStatus, String> {
-        self.assets.start_download()
+    pub async fn model_status(
+        &self,
+        language: OcrRecognitionLanguage,
+    ) -> Result<ModelStatus, String> {
+        self.assets_for(language).status().await
+    }
+
+    pub fn download_models(&self, language: OcrRecognitionLanguage) -> Result<ModelStatus, String> {
+        self.assets_for(language).start_download()
     }
 
     pub async fn cancel_download(&self) {
         self.assets.cancel_download().await;
+        self.korean_assets.cancel_download().await;
     }
 
-    pub async fn delete_models(&self) -> Result<ModelStatus, String> {
+    pub async fn delete_models(
+        &self,
+        language: OcrRecognitionLanguage,
+    ) -> Result<ModelStatus, String> {
         let permit = self
             .inference_gate
             .clone()
             .try_acquire_owned()
             .map_err(|_| "Local OCR is recognizing; try deleting the models again later")?;
         let engine = self.engine.clone();
-        let assets = self.assets.clone();
+        let assets = self.assets_for(language).clone();
         let execution = self.execution.clone();
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
@@ -81,12 +100,14 @@ impl LocalOcrRuntime {
         &self,
         images: [OcrImage; N],
         device: OcrDevice,
+        language: OcrRecognitionLanguage,
         progress: impl FnMut(Phase),
     ) -> Result<[Vec<TextBlock>; N], String> {
         let mut results = std::array::from_fn(|_| Vec::new());
         self.recognize_each(
             images.into_iter().collect(),
             device,
+            language,
             progress,
             |eye, blocks| results[eye] = blocks,
         )
@@ -98,6 +119,7 @@ impl LocalOcrRuntime {
         &self,
         images: Vec<OcrImage>,
         device: OcrDevice,
+        language: OcrRecognitionLanguage,
         mut progress: impl FnMut(Phase),
         mut recognized: impl FnMut(usize, Vec<TextBlock>),
     ) -> Result<(), String> {
@@ -130,7 +152,7 @@ impl LocalOcrRuntime {
             options: options.clone(),
         };
         let engine = self.engine.clone();
-        let assets = self.assets.clone();
+        let assets = self.assets_for(language).clone();
         let execution = self.execution.clone();
         let (sender, mut receiver) = tokio::sync::mpsc::channel(4);
         let span = tracing::Span::current();
@@ -139,10 +161,9 @@ impl LocalOcrRuntime {
             let _permit = permit;
             let mut engine = engine.lock().map_err(|_| "Local OCR engine lock failed")?;
             check_cancelled(&cancelled)?;
-            if engine
-                .as_ref()
-                .is_none_or(|engine| engine.execution.requested_device != device)
-            {
+            if engine.as_ref().is_none_or(|engine| {
+                engine.execution.requested_device != device || engine.language != language
+            }) {
                 let started = std::time::Instant::now();
                 let _ = sender.try_send(InferenceUpdate::Phase(Phase::LoadingModel));
                 assets.verify()?;
@@ -153,7 +174,7 @@ impl LocalOcrRuntime {
                         requested_device: device,
                         ..Default::default()
                     };
-                *engine = Some(Engine::load(&assets.directory, device)?);
+                *engine = Some(Engine::load(&assets.directory, device, language)?);
                 let status = engine.as_ref().unwrap().execution.clone();
                 if let Some(reason) = &status.fallback_reason {
                     tracing::warn!(reason, "OCR DirectML loading failed; using CPU");
@@ -178,11 +199,10 @@ impl LocalOcrRuntime {
                             reason = error,
                             "OCR DirectML inference failed; retrying on CPU"
                         );
-                        *engine = Engine::load(&assets.directory, OcrDevice::Cpu).map_err(
-                            |cpu_error| {
+                        *engine = Engine::load(&assets.directory, OcrDevice::Cpu, language)
+                            .map_err(|cpu_error| {
                                 format!("DirectML failed: {error}; CPU loading failed: {cpu_error}")
-                            },
-                        )?;
+                            })?;
                         engine.execution.requested_device = device;
                         engine.execution.fallback_reason = Some(error);
                         *execution.write().unwrap_or_else(|error| error.into_inner()) =
@@ -232,6 +252,7 @@ fn check_cancelled(cancelled: &AtomicBool) -> Result<(), String> {
 }
 
 struct Engine {
+    language: OcrRecognitionLanguage,
     detector: Session,
     recognizer: Session,
     characters: Vec<String>,
@@ -239,7 +260,11 @@ struct Engine {
 }
 
 impl Engine {
-    fn load(directory: &std::path::Path, device: OcrDevice) -> Result<Self, String> {
+    fn load(
+        directory: &std::path::Path,
+        device: OcrDevice,
+        language: OcrRecognitionLanguage,
+    ) -> Result<Self, String> {
         let load = |filename: &str, device: OcrDevice| {
             let session = || -> ort::Result<Session> {
                 let builder = Session::builder()?
@@ -275,6 +300,7 @@ impl Engine {
             Ok((load("det.onnx", device)?, load("rec.onnx", device)?))
         })?;
         Ok(Self {
+            language,
             detector,
             recognizer,
             characters: characters(
@@ -493,15 +519,63 @@ mod tests {
         let path = directory.path().join("det.onnx");
         std::fs::write(&path, b"model").unwrap();
         let inference = runtime.inference_gate.acquire().await.unwrap();
-        assert!(runtime.delete_models().await.is_err());
+        assert!(runtime
+            .delete_models(OcrRecognitionLanguage::Multilingual)
+            .await
+            .is_err());
         assert!(path.exists());
         drop(inference);
         assert_eq!(
-            runtime.delete_models().await.unwrap().state,
+            runtime
+                .delete_models(OcrRecognitionLanguage::Multilingual)
+                .await
+                .unwrap()
+                .state,
             super::super::ModelState::Missing
         );
         assert!(!path.exists());
         assert_eq!(runtime.inference_gate.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn ocr_models_keep_language_downloads_and_deletions_independent() {
+        let directory = tempfile::tempdir().unwrap();
+        let runtime = LocalOcrRuntime::new(directory.path().into());
+        std::fs::create_dir_all(directory.path().join("korean")).unwrap();
+        let multilingual = directory.path().join("rec.onnx");
+        let korean = directory.path().join("korean/rec.onnx");
+        std::fs::write(&multilingual, b"multilingual").unwrap();
+        std::fs::write(&korean, b"korean").unwrap();
+        let legacy_status = runtime
+            .model_status(OcrRecognitionLanguage::Multilingual)
+            .await
+            .unwrap();
+        let korean_status = runtime
+            .model_status(OcrRecognitionLanguage::Korean)
+            .await
+            .unwrap();
+        assert_eq!(
+            legacy_status.recognition_language,
+            OcrRecognitionLanguage::Multilingual
+        );
+        assert_eq!(
+            korean_status.recognition_language,
+            OcrRecognitionLanguage::Korean
+        );
+        assert_ne!(legacy_status.total_bytes, korean_status.total_bytes);
+        runtime
+            .delete_models(OcrRecognitionLanguage::Korean)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&multilingual).unwrap(), b"multilingual");
+        assert!(!korean.exists());
+        std::fs::write(&korean, b"korean").unwrap();
+        runtime
+            .delete_models(OcrRecognitionLanguage::Multilingual)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&korean).unwrap(), b"korean");
+        assert!(!multilingual.exists());
     }
 
     #[test]
@@ -521,10 +595,129 @@ mod tests {
         assert_eq!(dictionary, ["", "!", "あ", "字", " "]);
         assert!(characters("").is_err());
         assert!(characters("a\n\na\n").is_err());
+        assert_eq!(
+            characters("ᄀ\n가\n힣\nA\n").unwrap(),
+            ["", "ᄀ", "가", "힣", "A", " "]
+        );
     }
 
     fn sample() -> OcrImage {
         sample_offset(0)
+    }
+
+    fn korean_sample() -> OcrImage {
+        use std::io::Read;
+        let compressed = include_bytes!("../../tests/fixtures/korean-sign.rgba.zip");
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(compressed)).unwrap();
+        let mut pixels = Vec::new();
+        archive
+            .by_name("korean-sign.rgba")
+            .unwrap()
+            .read_to_end(&mut pixels)
+            .unwrap();
+        assert_eq!(pixels.len(), 1000 * 360 * 4);
+        OcrImage {
+            data: OcrImageData::Rgba(pixels),
+            width: 1000,
+            height: 360,
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires downloaded official Korean PP-OCRv5 and PP-OCRv6 detector weights"]
+    async fn ocr_official_onnx_models_recognize_korean_sample() {
+        let directory = std::env::var_os("VRCS_TEST_OCR_MODELS")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models/ocr/ppocrv6-small")
+            });
+        let runtime = LocalOcrRuntime::new(directory);
+        assert_eq!(
+            runtime
+                .model_status(OcrRecognitionLanguage::Korean)
+                .await
+                .unwrap()
+                .state,
+            super::super::ModelState::Ready
+        );
+        let started = std::time::Instant::now();
+        let [blocks] = runtime
+            .recognize(
+                [korean_sample()],
+                OcrDevice::Cpu,
+                OcrRecognitionLanguage::Korean,
+                |_| {},
+            )
+            .await
+            .unwrap();
+        println!(
+            "Cold Korean OCR: {:?}; recognized: {blocks:?}",
+            started.elapsed()
+        );
+        let recognized: String = blocks
+            .iter()
+            .flat_map(|block| block.text.chars())
+            .filter(|c| !c.is_whitespace())
+            .collect();
+        for expected in [
+            "안녕하세요",
+            "한국어를공부하고있어요",
+            "메뉴김치찌개9000원",
+            "입구는오른쪽입니다",
+        ] {
+            assert!(
+                recognized.contains(expected),
+                "Missing {expected}: {recognized}"
+            );
+        }
+        assert!(blocks.iter().all(|block| block.confidence >= 0.6));
+        assert_eq!(
+            runtime.engine.lock().unwrap().as_ref().unwrap().language,
+            OcrRecognitionLanguage::Korean
+        );
+        let [warm] = runtime
+            .recognize(
+                [korean_sample()],
+                OcrDevice::Cpu,
+                OcrRecognitionLanguage::Korean,
+                |_| {},
+            )
+            .await
+            .unwrap();
+        assert_eq!(warm, blocks);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires both official multilingual and Korean OCR model bundles"]
+    async fn ocr_language_switch_reloads_the_matching_recognizer() {
+        let directory = std::env::var_os("VRCS_TEST_OCR_MODELS")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models/ocr/ppocrv6-small")
+            });
+        let runtime = LocalOcrRuntime::new(directory);
+        for language in [
+            OcrRecognitionLanguage::Korean,
+            OcrRecognitionLanguage::Multilingual,
+            OcrRecognitionLanguage::Korean,
+        ] {
+            let (image, expected) = match language {
+                OcrRecognitionLanguage::Korean => (korean_sample(), "안녕하세요"),
+                OcrRecognitionLanguage::Multilingual => (sample(), "こんにちは"),
+            };
+            let [blocks] = runtime
+                .recognize([image], OcrDevice::Cpu, language, |_| {})
+                .await
+                .unwrap();
+            assert!(
+                blocks.iter().any(|block| block.text == expected),
+                "{language:?}: {blocks:?}"
+            );
+            assert_eq!(
+                runtime.engine.lock().unwrap().as_ref().unwrap().language,
+                language
+            );
+        }
     }
 
     fn sample_offset(offset: usize) -> OcrImage {
@@ -550,7 +743,12 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let runtime = LocalOcrRuntime::new(directory.path().into());
         let error = runtime
-            .recognize([sample(), sample()], OcrDevice::Cpu, |_| {})
+            .recognize(
+                [sample(), sample()],
+                OcrDevice::Cpu,
+                OcrRecognitionLanguage::Multilingual,
+                |_| {},
+            )
             .await
             .unwrap_err();
         assert!(error.contains("models are missing"), "{error}");
@@ -652,7 +850,12 @@ mod tests {
             data: OcrImageData::Rgba(vec![255; 5120 * 2 * 4]),
         };
         let error = runtime
-            .recognize([image], OcrDevice::Cpu, |_| {})
+            .recognize(
+                [image],
+                OcrDevice::Cpu,
+                OcrRecognitionLanguage::Multilingual,
+                |_| {},
+            )
             .await
             .err()
             .unwrap();
@@ -669,12 +872,21 @@ mod tests {
             });
         let runtime = LocalOcrRuntime::new(directory);
         assert_eq!(
-            runtime.model_status().await.unwrap().state,
+            runtime
+                .model_status(OcrRecognitionLanguage::Multilingual)
+                .await
+                .unwrap()
+                .state,
             super::super::ModelState::Ready
         );
         let started = std::time::Instant::now();
         let result = runtime
-            .recognize([sample(), sample_offset(30)], OcrDevice::Cpu, |_| {})
+            .recognize(
+                [sample(), sample_offset(30)],
+                OcrDevice::Cpu,
+                OcrRecognitionLanguage::Multilingual,
+                |_| {},
+            )
             .await
             .unwrap();
         println!("Cold stereo OCR: {:?}", started.elapsed());
@@ -704,7 +916,12 @@ mod tests {
         }
         let started = std::time::Instant::now();
         let warm = runtime
-            .recognize([sample(), sample_offset(30)], OcrDevice::Cpu, |_| {})
+            .recognize(
+                [sample(), sample_offset(30)],
+                OcrDevice::Cpu,
+                OcrRecognitionLanguage::Multilingual,
+                |_| {},
+            )
             .await
             .unwrap();
         assert_eq!(warm, result);
@@ -722,12 +939,22 @@ mod tests {
             });
         let runtime = LocalOcrRuntime::new(directory);
         let cpu = runtime
-            .recognize([sample()], OcrDevice::Cpu, |_| {})
+            .recognize(
+                [sample()],
+                OcrDevice::Cpu,
+                OcrRecognitionLanguage::Multilingual,
+                |_| {},
+            )
             .await
             .unwrap();
         let started = std::time::Instant::now();
         let gpu = runtime
-            .recognize([sample()], OcrDevice::Directml, |_| {})
+            .recognize(
+                [sample()],
+                OcrDevice::Directml,
+                OcrRecognitionLanguage::Multilingual,
+                |_| {},
+            )
             .await
             .unwrap();
         println!("Cold DirectML OCR: {:?}", started.elapsed());
@@ -744,7 +971,12 @@ mod tests {
         );
         let started = std::time::Instant::now();
         let warm = runtime
-            .recognize([sample_offset(30)], OcrDevice::Directml, |_| {})
+            .recognize(
+                [sample_offset(30)],
+                OcrDevice::Directml,
+                OcrRecognitionLanguage::Multilingual,
+                |_| {},
+            )
             .await
             .unwrap();
         println!("Warm DirectML OCR: {:?}", started.elapsed());
@@ -763,7 +995,12 @@ mod tests {
             }
         }
         runtime
-            .recognize([sample()], OcrDevice::Cpu, |_| {})
+            .recognize(
+                [sample()],
+                OcrDevice::Cpu,
+                OcrRecognitionLanguage::Multilingual,
+                |_| {},
+            )
             .await
             .unwrap();
         let status = runtime.execution_status();
@@ -783,7 +1020,12 @@ mod tests {
             });
         let runtime = LocalOcrRuntime::new(directory.clone());
         runtime
-            .recognize([sample()], OcrDevice::Directml, |_| {})
+            .recognize(
+                [sample()],
+                OcrDevice::Directml,
+                OcrRecognitionLanguage::Multilingual,
+                |_| {},
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -796,7 +1038,12 @@ mod tests {
             .commit_from_file(directory.join("det.onnx"))
             .unwrap();
         let result = runtime
-            .recognize([sample()], OcrDevice::Directml, |_| {})
+            .recognize(
+                [sample()],
+                OcrDevice::Directml,
+                OcrRecognitionLanguage::Multilingual,
+                |_| {},
+            )
             .await
             .unwrap();
         assert!(result[0]
@@ -807,7 +1054,12 @@ mod tests {
         assert_eq!(status.requested_device, OcrDevice::Directml);
         assert!(status.fallback_reason.is_some());
         runtime
-            .recognize([sample()], OcrDevice::Directml, |_| {})
+            .recognize(
+                [sample()],
+                OcrDevice::Directml,
+                OcrRecognitionLanguage::Multilingual,
+                |_| {},
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -1045,11 +1297,16 @@ mod tests {
         let worker_recognizing = recognizing.clone();
         let task = tokio::spawn(async move {
             worker_runtime
-                .recognize([sample(), sample()], OcrDevice::Cpu, move |phase| {
-                    if phase == Phase::Recognizing {
-                        worker_recognizing.notify_one();
-                    }
-                })
+                .recognize(
+                    [sample(), sample()],
+                    OcrDevice::Cpu,
+                    OcrRecognitionLanguage::Multilingual,
+                    move |phase| {
+                        if phase == Phase::Recognizing {
+                            worker_recognizing.notify_one();
+                        }
+                    },
+                )
                 .await
         });
         tokio::time::timeout(std::time::Duration::from_secs(5), recognizing.notified())
@@ -1066,7 +1323,12 @@ mod tests {
         .unwrap();
         drop(permit);
         let blocks = runtime
-            .recognize([sample(), sample()], OcrDevice::Cpu, |_| {})
+            .recognize(
+                [sample(), sample()],
+                OcrDevice::Cpu,
+                OcrRecognitionLanguage::Multilingual,
+                |_| {},
+            )
             .await
             .unwrap();
         assert_eq!(blocks[0][0].text, "LOCAL OCR TEST 123");

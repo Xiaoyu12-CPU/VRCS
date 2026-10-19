@@ -59,8 +59,18 @@ impl Database {
     /// 分级查词：精确词条 → 内置精确 → 精确读音 → 词形还原精确 → 词条前缀 → 内置前缀 → 读音前缀 → 截短前缀精确。
     pub fn lookup(&self, term: &str, limit: u32) -> AppResult<Vec<DictionaryEntry>> {
         let query = term.trim();
-        if query.is_empty() {
+        if query.is_empty() || limit == 0 {
             return Ok(Vec::new());
+        }
+        if let Some(normalized) = super::korean::normalize_query(query) {
+            let mut entries = self.lookup_korean(query, normalized, limit)?;
+            // The query is a single pure Hangul word. Legacy Yomitan packages
+            // may default to ja; project the lookup language for UI/Anki without
+            // changing the imported dictionary's source metadata.
+            for entry in &mut entries {
+                entry.language = "ko".into();
+            }
+            return Ok(entries);
         }
         if let Some(entries) = self.lookup_exact(query, limit)? {
             return Ok(entries);
@@ -96,6 +106,88 @@ impl Database {
             }
         }
         Ok(Vec::new())
+    }
+
+    fn lookup_korean(
+        &self,
+        query: &str,
+        normalized: &str,
+        limit: u32,
+    ) -> AppResult<Vec<DictionaryEntry>> {
+        // Headwords take priority over guesses. Do not use reading matches for
+        // Korean candidates: a different dictionary's reading can swallow a
+        // valid alternative. Older Korean packages can be labelled "ja", so
+        // language metadata is deliberately not used as a filter.
+        if let Some(entries) = self.lookup_term_exact(query, limit)? {
+            return Ok(entries);
+        }
+        if normalized != query {
+            if let Some(entries) = self.lookup_term_exact(normalized, limit)? {
+                return Ok(entries);
+            }
+        }
+        let mut results = Vec::new();
+        let mut seen = HashSet::new();
+        let mut groups = Vec::new();
+        for candidate in super::korean::candidates(normalized) {
+            if let Some(entries) = self.lookup_term_exact(&candidate, limit)? {
+                groups.push(entries.into_iter());
+            }
+        }
+        // Give each matched lemma a place before adding its remaining senses;
+        // ten senses of 들다 must not hide the alternative 듣다 at limit 10.
+        loop {
+            let mut consumed = false;
+            for group in &mut groups {
+                if let Some(entry) = group.next() {
+                    consumed = true;
+                    if seen.insert((
+                        entry.term.clone(),
+                        entry.reading.clone(),
+                        entry.language.clone(),
+                        entry.definition.clone(),
+                        entry.dictionary.clone(),
+                    )) {
+                        results.push(entry);
+                        if results.len() == limit as usize {
+                            return Ok(results);
+                        }
+                    }
+                }
+            }
+            if !consumed {
+                break;
+            }
+        }
+        if !results.is_empty() {
+            return Ok(results);
+        }
+
+        let prefix = like_prefix(normalized);
+        if let Some(entries) = self.lookup_imported(
+            "entries.term LIKE ? ESCAPE '\\' COLLATE NOCASE",
+            &prefix,
+            limit,
+        )? {
+            return Ok(entries);
+        }
+        // Truncating Korean words arbitrarily would reintroduce bare stems and
+        // defeat the checked lemma candidates (먹었어요 must not become 먹).
+        self.lookup_legacy("term LIKE ? ESCAPE '\\' COLLATE NOCASE", &prefix, limit)
+    }
+
+    fn lookup_term_exact(
+        &self,
+        query: &str,
+        limit: u32,
+    ) -> AppResult<Option<Vec<DictionaryEntry>>> {
+        if let Some(entries) =
+            self.lookup_imported("entries.term = ? COLLATE NOCASE", query, limit)?
+        {
+            return Ok(Some(entries));
+        }
+        let legacy = self.lookup_legacy("term = ? COLLATE NOCASE", query, limit)?;
+        Ok((!legacy.is_empty()).then_some(legacy))
     }
 
     fn lookup_exact(&self, query: &str, limit: u32) -> AppResult<Option<Vec<DictionaryEntry>>> {

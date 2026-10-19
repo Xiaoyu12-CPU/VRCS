@@ -46,4 +46,7 @@ pub use translation::{
 pub use validation::{validate_glossary_source_url, validate_translation_prompt};
 pub use vr_overlay::{VrOverlayConfig, VrOverlayHeadsetConfig, VrOverlayWristConfig};
 
-pub use ocr::{OcrDevice, VisionConfig, VrOcrConfig, VrOcrDisplayMode, VrOcrWristConfig};
+pub use ocr::{
+    OcrDevice, OcrRecognitionLanguage, VisionConfig, VrOcrConfig, VrOcrDisplayMode,
+    VrOcrWristConfig,
+};

@@ -10,6 +10,7 @@ use crate::error::AppResult;
 mod chatbox;
 pub(crate) mod conversations;
 mod dictionary;
+mod korean;
 mod learning;
 mod storage;
 mod subtitle_search;

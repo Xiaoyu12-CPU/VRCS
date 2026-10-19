@@ -30,7 +30,7 @@ Download `VRCS-<version>-windows-x64.exe` from [GitHub Releases](https://github.
 - Local Qwen ASR supports CPU or Vulkan. Download its runtime and model in recognition settings.
 - An internet connection is needed for the initial Silero VAD download and, if enabled, Smart Turn semantic endpointing.
 - Cloud recognition, translation, and learning analysis require the selected provider's API credentials. Provider charges may apply.
-- For OCR, download the local PP-OCRv6 models.
+- For OCR, download the local models for the selected recognition language: PP-OCRv6 multilingual or the separate Korean recognizer and dictionary.
 
 ## Getting started
 
@@ -51,9 +51,11 @@ Turn off unused features in **Settings › System › Features** to hide their s
 - Customize prompts, local and subscribed glossaries, and subtitle context. Add world and member context from [VRCX-0](https://vrcx-0.dev/), and switch recognition, translation, and Chatbox settings with language presets.
 - Send microphone subtitles and translations to the VRChat OSC Chatbox, with quick input, translation preview, multilingual output, and optional OSCQuery mute synchronization.
 - Read multilingual subtitles in your SteamVR headset or on your wrist. Adjust subtitle layout, languages, and Chatbox settings from the dashboard.
-- Select text on your desktop or in VR for OCR translation. Use local PP-OCRv6 on CPU or DirectML GPU; view results in a desktop window, on your wrist, or over the source text in VR.
+- Select text on your desktop or in VR for OCR translation. Choose local PP-OCRv6 multilingual or PP-OCRv5 Korean recognition on CPU or DirectML GPU; view results in a desktop window, on your wrist, or over the source text in VR. Select the screen text language in Vision settings and download that mode's models separately. Recognition language and translation targets are independent.
 - Ask questions about selected images on your desktop or in VR. Type or dictate on the desktop; hold the left trigger to speak in VR. Answers appear in a separate window or a wrist panel with Markdown support. OCR is not required.
 - Import Yomitan dictionaries, look up words or Ask AI from subtitles, and review definitions, sentence patterns, and conversations. Edit vocabulary, sentence-pattern, or cloze cards and send them to Anki through AnkiConnect.
+
+Korean dictionary lookup includes bounded guesses for common inflections, contractions, and noun particles, verified against imported headwords. Ambiguous forms retain multiple matches and require sentence context; this is not a full morphological analyzer. Korean learning prompts preserve Hangul and distinguish dictionary forms, particles, endings, speech levels, and subject honorification while respecting the selected explanation language. Actual recognition and AI quality depend on the models, audio/images, and device.
 
 ## Privacy
 

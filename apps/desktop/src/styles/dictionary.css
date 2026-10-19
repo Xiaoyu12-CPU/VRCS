@@ -81,6 +81,10 @@
 }
 .dictionary-popover .spinning { animation: subtitle-context-menu-spin 850ms linear infinite; }
 .dictionary-definitions { display: grid; gap: 7px; margin-bottom: 10px; }
+.dictionary-candidate-hint { margin: 0; padding: 4px 2px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+.dictionary-entry-headword { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px 8px; margin-bottom: 8px; }
+.dictionary-entry-headword strong { color: var(--text); font-size: 14px; font-weight: 650; overflow-wrap: anywhere; }
+.dictionary-entry-headword .reading { color: var(--text-quiet); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
 .dictionary-definition-item {
   padding: 11px 12px 12px;
   border: 1px solid var(--border);

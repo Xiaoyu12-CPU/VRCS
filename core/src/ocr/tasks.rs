@@ -352,7 +352,7 @@ impl VrOcrService {
                                 .find(|profile| Some(&profile.id) == target.profile_id.as_ref());
                             let key: [u8; 32] = Sha256::digest(serde_json::to_vec(&(
                                 &block.source.text, target, profile, &config.translation.prompt,
-                                context_key, glossary,
+                                context_key, glossary, ocr.recognition_language,
                             )).expect("OCR translation cache key is serializable")).into();
                             // Pending and completed requests share subscribers; target slots stay separate.
                             if let Some(&request_index) = seen.get(&(key, target_index)) {
@@ -473,6 +473,16 @@ mod tests {
     use serde_json::json;
     use std::sync::{Arc, RwLock};
     use std::time::Duration;
+
+    #[test]
+    fn ocr_recognizer_language_change_invalidates_the_scan_snapshot() {
+        let (service, _) = service(None);
+        let snapshot = service.configuration().unwrap();
+        assert!(service.configuration_matches(&snapshot));
+        service.config.write().unwrap().ocr.recognition_language =
+            crate::config::OcrRecognitionLanguage::Korean;
+        assert!(!service.configuration_matches(&snapshot));
+    }
 
     #[tokio::test]
     async fn progress_counts_target_slots_and_cached_requests_without_double_counting_eyes() {

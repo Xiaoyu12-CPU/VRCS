@@ -131,7 +131,7 @@ impl VrOcrService {
             let blocks = tokio::time::timeout_at(deadline, async {
                 let blocks = self
                     .local
-                    .recognize(images, ocr.device, &mut progress)
+                    .recognize(images, ocr.device, ocr.recognition_language, &mut progress)
                     .await?
                     .into_iter()
                     .collect();
@@ -236,6 +236,7 @@ impl VrOcrService {
                     .recognize_each(
                         images,
                         config.ocr().device,
+                        config.ocr().recognition_language,
                         |phase| report_eye(None, phase),
                         recognized,
                     )

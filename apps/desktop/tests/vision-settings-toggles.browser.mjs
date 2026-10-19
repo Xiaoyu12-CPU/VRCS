@@ -7,11 +7,11 @@ import test from "node:test";
 import { build } from "esbuild";
 
 const testDirectory = dirname(fileURLToPath(import.meta.url));
-const browser = [process.env.PROGRAMFILES, process.env["PROGRAMFILES(X86)"], process.env.LOCALAPPDATA]
+const browser = [...[process.env.PROGRAMFILES, process.env["PROGRAMFILES(X86)"], process.env.LOCALAPPDATA]
   .filter(Boolean).flatMap(root => [
     join(root, "Google/Chrome/Application/chrome.exe"),
     join(root, "Microsoft/Edge/Application/msedge.exe"),
-  ]).find(existsSync);
+  ]), "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].find(existsSync);
 
 for (const backend of ["cloud", "local"]) {
   test(`OCR (${backend}), vision and VR Overlay switches hide settings without losing configuration`, {
@@ -30,10 +30,16 @@ for (const backend of ["cloud", "local"]) {
         import { VrOverlaySettingsSection } from './src/settings/sections/VrOverlaySettingsSection';
         import { DEFAULT_VISION_SETTINGS, selectVisionProfile } from './src/settings/vision-settings';
         await i18next.use(initReactI18next).init({ lng: 'en', resources: { en: { translation: {} } } });
-        window.fetch = async () => new Response(JSON.stringify({
+        window.modelRequests = [];
+        window.fetch = async url => {
+          const language = new URL(String(url)).searchParams.get('language') ?? 'multilingual';
+          if (String(url).includes('/ocr/models')) window.modelRequests.push(String(url));
+          return new Response(JSON.stringify({
           configured: true, stored_configured: true, environment_override: false,
+          recognition_language: language,
           state: 'ready', downloaded_bytes: 1, total_bytes: 1, models: ['image-model'],
-        }), { status: 200 });
+          }), { status: 200 });
+        };
         const profiles = [{ id: 'images', name: 'Image service', provider: 'openai',
           provider_display_name: 'OpenAI', enabled_capabilities: ['image_understanding'] }];
         let ocr, vision, overlay;
@@ -107,6 +113,26 @@ for (const backend of ["cloud", "local"]) {
           checkMasterHeading(ocrCard, ocrMaster, 'OCR');
           checkMasterHeading(visionCard, visionMaster, 'Vision');
           check(!ocrCard.querySelector(':scope > header .vr-overlay-status-badge'), 'OCR: model badge is removed from the heading');
+          const selectOcrLanguage = async value => {
+            ocrCard.querySelector('[aria-label="settings.vrOcr.recognitionLanguage"]').click();
+            await wait(() => [...document.querySelectorAll('[role=option]')].some(option => option.textContent === 'settings.vrOcr.recognitionLanguages.' + value));
+            [...document.querySelectorAll('[role=option]')].find(option => option.textContent === 'settings.vrOcr.recognitionLanguages.' + value).click();
+            await wait(() => ocr.recognition_language === value);
+          };
+          ocrMaster.click();
+          await wait(() => ocrCard.querySelector('[aria-label="settings.vrOcr.recognitionLanguage"]'));
+          await selectOcrLanguage('korean');
+          await wait(() => ocrCard.textContent.includes('PP-OCRv5 Korean') && window.modelRequests.some(url => url.endsWith('language=korean')));
+          check(!ocr.desktop_enabled && !ocr.enabled, 'Changing recognition language does not enable capture');
+          ocrMaster.click();
+          await wait(() => !ocrCard.querySelector('section'));
+          check(ocr.recognition_language === 'korean', 'Turning OCR off retains Korean recognition');
+          ocrMaster.click();
+          await wait(() => ocrCard.querySelector('[aria-label="settings.vrOcr.recognitionLanguage"]'));
+          await selectOcrLanguage('multilingual');
+          await wait(() => ocrCard.textContent.includes('PP-OCRv6 small'));
+          ocrMaster.click();
+          await wait(() => !ocrCard.querySelector('section'));
           const overlayPanel = document.querySelector('#settings-panel-vr_overlay');
           const overlayMaster = overlayPanel.querySelector('[role=switch]');
           const overlaySnapshot = JSON.stringify(overlay);

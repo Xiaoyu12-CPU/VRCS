@@ -7,7 +7,7 @@ import { ankiButtonLabel } from "../anki/anki";
 import type { AnkiAddState } from "../anki/anki";
 import { contextExcerpt, localizedError } from "../app/app-utils";
 import type { Lookup } from "../app/app-types";
-import { ankiDictionaryContent, definitionGlosses, groupDictionaryEntries } from "./dictionary";
+import { ankiDictionaryContent, definitionGlosses, groupDictionaryEntries, hasAmbiguousKoreanHeadwords } from "./dictionary";
 import { LOOKUP_POPOVER_HEIGHT } from "../shared/lib/popover-placement";
 import { SelectionPopoverSurface } from "../selection/SelectionPopoverSurface";
 
@@ -20,6 +20,8 @@ export function DictionaryPopover({ lookup, loading = false, ankiEnabled, compac
   const groupedEntries = groupDictionaryEntries(lookup.entries);
   const entry = groupedEntries[0];
   const visibleEntries = groupedEntries.slice(0, 6);
+  const showHeadwords = groupedEntries.some((item) => item.term !== lookup.term);
+  const ambiguousKoreanForms = hasAmbiguousKoreanHeadwords(lookup.term, groupedEntries);
 
   useEffect(() => {
     setAnkiState("idle");
@@ -30,13 +32,13 @@ export function DictionaryPopover({ lookup, loading = false, ankiEnabled, compac
 
   const add = async () => {
     if (!entry || ankiState === "adding") return;
-    const cardContent = ankiDictionaryContent(visibleEntries, t("dictionary.builtIn"));
+    const cardContent = ankiDictionaryContent(visibleEntries, t("dictionary.builtIn"), lookup.term);
     setAnkiState("adding");
     setAnkiFeedback("");
     try {
       const result = await ankiApi.createCard({
         term: lookup.term,
-        reading: entry.reading,
+        reading: showHeadwords ? null : entry.reading,
         definition: cardContent.definition,
         context: lookup.context,
         dictionary: cardContent.dictionary,
@@ -89,7 +91,7 @@ export function DictionaryPopover({ lookup, loading = false, ankiEnabled, compac
         <div className="dictionary-title-block">
           <div className="dictionary-title-copy">
             <div className="dictionary-term-row"><h2>{lookup.term}</h2>{entry && <span className="language-chip">{entry.language.toUpperCase()}</span>}</div>
-            {entry?.reading && <span className="reading">{entry.reading}</span>}
+            {!showHeadwords && entry?.reading && entry.reading !== lookup.term && <span className="reading">{entry.reading}</span>}
           </div>
         </div>
         <button type="button" aria-label={t("dictionary.close")} onClick={onClose}><X size={19} /></button>
@@ -102,12 +104,19 @@ export function DictionaryPopover({ lookup, loading = false, ankiEnabled, compac
           </div>
         ) : visibleEntries.length ? (
           <div className="dictionary-definitions">
+            {ambiguousKoreanForms && <p className="dictionary-candidate-hint">{t("dictionary.ambiguousKoreanForms")}</p>}
             {visibleEntries.map((item, index) => (
               <article className="dictionary-definition-item" key={`${item.dictionary ?? "local"}-${item.term}-${item.reading ?? ""}-${index}`}>
                 <div className="dictionary-entry-meta">
                   <span className="dictionary-source-name">{item.dictionary || t("dictionary.builtIn")}</span>
                   {visibleEntries.length > 1 && <span className="dictionary-entry-index">{String(index + 1).padStart(2, "0")}</span>}
                 </div>
+                {showHeadwords && (
+                  <div className="dictionary-entry-headword">
+                    <strong>{item.term}</strong>
+                    {item.reading && item.reading !== item.term && <span className="reading">{item.reading}</span>}
+                  </div>
+                )}
                 <ol className="definition-glosses">
                   {definitionGlosses(item.definition).map((gloss, glossIndex) => <li key={`${gloss}-${glossIndex}`}>{gloss}</li>)}
                 </ol>

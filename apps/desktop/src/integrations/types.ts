@@ -91,6 +91,7 @@ export interface VrOcrSettings {
   desktop_enabled: boolean;
   shortcut: string;
   device: "cpu" | "directml";
+  recognition_language: "multilingual" | "korean";
   display_mode: "wrist" | "stereo";
   timeout_seconds: number;
   minimum_confidence: number;
@@ -107,6 +108,7 @@ export type VrOcrWristSettings = Pick<VrOverlayWristSettings,
   "pitch_deg" | "yaw_deg" | "roll_deg" | "width_m" | "opacity" | "font_size_px">;
 
 export interface VrOcrModelStatus {
+  recognition_language: VrOcrSettings["recognition_language"];
   state: "missing" | "downloading" | "ready" | "error";
   downloaded_bytes: number;
   total_bytes: number;
