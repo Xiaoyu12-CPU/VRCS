@@ -27,6 +27,10 @@ try {
     $config.bundle.createUpdaterArtifacts = $false
     [System.IO.File]::WriteAllText($generatedConfig, ($config | ConvertTo-Json -Depth 20), [System.Text.UTF8Encoding]::new($false))
 
+    $installerRoot = Join-Path $targetRoot "release\bundle\nsis"
+    if (Test-Path -LiteralPath $installerRoot) {
+        Remove-Item -LiteralPath $installerRoot -Recurse -Force
+    }
     & npm --workspace apps/desktop run tauri -- build --features vulkan --config src-tauri/tauri.preview.generated.conf.json --bundles nsis --ci --no-sign
     if ($LASTEXITCODE -ne 0) { throw "Korean preview build failed."
     }
@@ -36,7 +40,7 @@ try {
     }
     $selfTest = Start-Process -FilePath $executable -ArgumentList "--release-self-test" -Wait -PassThru -WindowStyle Hidden
     if ($selfTest.ExitCode -ne 0) { throw "Preview self-test failed: $($selfTest.ExitCode)" }
-    $installers = @(Get-ChildItem -LiteralPath (Join-Path $targetRoot "release\bundle\nsis") -Filter "*.exe" -File)
+    $installers = @(Get-ChildItem -LiteralPath $installerRoot -Filter "*.exe" -File)
     if ($installers.Count -ne 1) { throw "Expected one preview installer, found $($installers.Count)." }
     $version = (Get-Content -LiteralPath (Join-Path $desktopRoot "tauri.conf.json") -Raw | ConvertFrom-Json).version
     New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
